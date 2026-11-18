@@ -71,15 +71,20 @@ if [ "$(id -u)" = 0 ]; then sudo=""; else sudo="sudo -n"; fi
 curl -fsSL https://pkgs.superlogical.com/rex/install.sh | $sudo sh -s -- --channel preview
 ```
 
-**Service.** Blueprint services start on every boot, after the init script, and restart when
-they fail.
+**Service.** Blueprint services start on every boot and restart when they fail. Do not rely on
+the init script having finished (see below).
 
 | Field | Value |
 |---|---|
 | Name | `rex-server` |
-| Command line | `sh -c 'exec rex server run --tailscale --tailscale-hostname "rex-$(hostname)"'` |
+| Command line | `sh -c 'until command -v rex >/dev/null 2>&1; do sleep 1; done; exec rex server run --tailscale --tailscale-hostname "rex-$(hostname)"'` |
 | Start | `on-boot` |
 | Restart | `always` |
+
+The service waits for `rex` because Namespace starts blueprint services while the init script is
+still running. On a test devbox, the service started within a second of the package install
+finishing. The loop makes the order safe: `dpkg` moves a finished binary into place in one step, so
+once `rex` is found it is complete.
 
 The dashboard takes the service as one command line, not a command and a list of arguments. The
 service runs it without a shell, so the `sh -c` is what runs `hostname` and replaces itself with
