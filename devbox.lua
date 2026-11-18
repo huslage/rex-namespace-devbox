@@ -1,7 +1,7 @@
 -- Rex script that connects a Namespace devbox as a Rex host.
 -- Run it through the devbox_up and devbox_down actions in init.lua, or directly:
 --
---   rex do ~/.config/rex/devbox.lua mode=up   [name=NAME] [blueprint=rex]
+--   rex do ~/.config/rex/devbox.lua mode=up   [name=NAME] [blueprint=rex] [open=false]
 --   rex do ~/.config/rex/devbox.lua mode=down  name=NAME  [stop=false]
 --
 -- It is a script, not an action body, because config-file actions have a 30 second
@@ -141,6 +141,30 @@ local function wait_reachable(label, devbox, dns)
   )
 end
 
+-- Make sure the devbox's Rex server has a session named after the devbox, with one shell.
+local function ensure_session(label)
+  local server = rex.server(label)
+  local res, err = server.call("session.list")
+  if res == nil then
+    fail("session.list on " .. label .. ": " .. tostring(err))
+  end
+  for _, sess in ipairs(res.sessions or {}) do
+    if sess.label == label then
+      return sess.session_id
+    end
+  end
+  local created, cerr = server.call("session.create", {
+    label = label,
+    initial_windows = {
+      { window_label = "shell", layout = { block = { flavor = "com.superlogical.terminal.shell", label = "shell" } } },
+    },
+  })
+  if created == nil then
+    fail("session.create on " .. label .. ": " .. tostring(cerr))
+  end
+  return created.session_id
+end
+
 local function up(args)
   local name = args.name or ("dev-" .. os.date("%m%d-%H%M%S"))
   if devbox_exists(name) then
@@ -156,8 +180,13 @@ local function up(args)
   register_host(name, dns)
   say("waiting for the Rex node to answer ...")
   wait_reachable(name, name, dns)
+  local session
+  if args.open ~= false then
+    session = ensure_session(name)
+    say("session " .. name .. " is ready on the devbox.")
+  end
   say("connected. Use: rex -S " .. name .. " ...")
-  return { label = name, endpoint = "https://" .. dns }
+  return { label = name, endpoint = "https://" .. dns, session_id = session }
 end
 
 local function down(args)

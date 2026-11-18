@@ -22,13 +22,15 @@ Actions in `init.lua` (logic in `devbox.lua`):
 
 | Command | Effect |
 |---|---|
-| `rex do devbox_up [name=NAME] [blueprint=rex]` | Create a devbox from the blueprint (or reuse `NAME`), register it as a Rex host, open the Tailscale sign-in link in your browser the first time, and wait until it answers. |
+| `rex do devbox_up [name=NAME] [blueprint=rex] [open=false]` | Create a devbox from the blueprint (or reuse `NAME`), register it as a Rex host, open the Tailscale sign-in link in your browser the first time, wait until it answers, and make sure the devbox has a session named `NAME` with one shell. `open=false` skips the session. |
 | `rex do devbox_down name=NAME [stop=false]` | Remove the Rex host and stop the devbox. |
 
 Both open a tab that shows progress. Connect with `rex -S NAME ...`. Run `rex config reload`
 after you edit `init.lua` or `devbox.lua`.
 
-Connect with `rex -S NAME`, where `NAME` is the devbox name. The Rex node's tailnet name is
+Connect with `rex -S NAME`, where `NAME` is the devbox name. The session `NAME` lives on the
+devbox's Rex server. A script cannot select it in the Rex app, because the app's client is not
+attached to the remote server; switch to the host in the app (**Switch Host**) to see it. The Rex node's tailnet name is
 `rex-NAME.<tailnet>.ts.net`.
 
 ## How the devbox connects
