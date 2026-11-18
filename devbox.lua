@@ -107,38 +107,89 @@ local function register_host(label, dns)
   end
 end
 
--- The node starts after the devbox boots and, the first time, after you sign in. While
--- waiting, open the sign-in link once when one appears.
-local function wait_reachable(label, devbox, dns)
-  local last = ""
-  local opened = nil
-  for i = 1, 100 do
-    local ok, server = pcall(rex.server, label)
-    if ok then
-      local res, err = server.call("server.whoami")
-      if res ~= nil then
-        return
-      end
-      last = tostring(err)
-    else
-      last = tostring(server)
+-- State of the devbox's rex-server service: "running", another status, or nil when unknown.
+local function service_status(devbox)
+  local r = run({ "devbox", "service", "list", devbox, "-o", "json" }, { timeout = 30 })
+  if not r.ok then
+    return nil
+  end
+  local ok, res = pcall(rex.json.decode, r.stdout)
+  if not ok or type(res) ~= "table" then
+    return nil
+  end
+  for _, svc in ipairs(res.services or {}) do
+    if svc.name == "rex-server" then
+      return svc.status
     end
-    if i % 3 == 1 then
+  end
+  return "missing"
+end
+
+-- Whether the Rex node is online in the tailnet, from the local Tailscale client.
+local function node_online(dns)
+  local r = run({ "tailscale", "status", "--json" }, { timeout = 30 })
+  if not r.ok then
+    return false
+  end
+  local ok, st = pcall(rex.json.decode, r.stdout)
+  if not ok or type(st) ~= "table" then
+    return false
+  end
+  for _, peer in pairs(st.Peer or {}) do
+    if (peer.DNSName or ""):gsub("%.$", "") == dns then
+      return peer.Online == true
+    end
+  end
+  return false
+end
+
+local START_SECONDS = 180 -- the service and the node must come up in this time
+local SIGNIN_SECONDS = 600 -- time you get to sign in once the link is shown
+
+-- Poll the service and the tailnet node. Fail as soon as the service is not running; open
+-- the sign-in link once when one appears.
+local function wait_reachable(label, devbox, dns)
+  local started = os.time()
+  local deadline = started + START_SECONDS
+  local opened = nil
+  local last = "node is not online in the tailnet"
+  while true do
+    local status = service_status(devbox)
+    if status ~= nil and status ~= "running" then
+      fail(
+        "the rex-server service on " .. devbox .. " is " .. status .. ".\n"
+          .. "Check `devbox service logs " .. devbox .. " rex-server`."
+      )
+    end
+    if node_online(dns) then
+      local ok, server = pcall(rex.server, label)
+      if ok then
+        local res, err = server.call("server.whoami")
+        if res ~= nil then
+          return
+        end
+        last = tostring(err)
+      else
+        last = tostring(server)
+      end
+    else
       local url = login_url(devbox)
       if url and url ~= opened then
         opened = url
+        deadline = os.time() + SIGNIN_SECONDS
         say("sign in to Tailscale to own this devbox's Rex node:\n  " .. url)
         run({ "open", url }, { timeout = 15 })
       end
     end
+    if os.time() >= deadline then
+      fail(
+        "registered host " .. label .. " but cannot reach https://" .. dns .. ".\n"
+          .. (opened and "Sign in to Tailscale as the user who should own the node.\n" or "")
+          .. "Last state: " .. last
+      )
+    end
     rex.sleep(3)
   end
-  fail(
-    "registered host " .. label .. " but cannot reach https://" .. dns .. ".\n"
-      .. "Check that you signed in to Tailscale as the user who should own the node, and that "
-      .. "the devbox's rex-server service is running (`devbox service list " .. devbox .. "`).\n"
-      .. "Last error: " .. last
-  )
 end
 
 -- Make sure the devbox's Rex server has a session named after the devbox, with one shell.

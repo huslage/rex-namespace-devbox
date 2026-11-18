@@ -25,7 +25,7 @@ Actions in `init.lua` (logic in `devbox.lua`):
 | `rex do devbox_up [name=NAME] [blueprint=rex] [open=false]` | Create a devbox from the blueprint (or reuse `NAME`), register it as a Rex host, open the Tailscale sign-in link in your browser the first time, wait until it answers, and make sure the devbox has a session named `NAME` with one shell. `open=false` skips the session. |
 | `rex do devbox_down name=NAME [stop=false]` | Remove the Rex host and stop the devbox. |
 
-Both open a tab that shows progress. Connect with `rex -S NAME ...`. Run `rex config reload`
+Both open a tab that shows progress. `devbox_up` polls the `rex-server` service and the tailnet node, and fails at once if the service is not running. It gives the node 3 minutes to come online, and 10 minutes to sign in after the link appears. Connect with `rex -S NAME ...`. Run `rex config reload`
 after you edit `init.lua` or `devbox.lua`.
 
 Connect with `rex -S NAME`, where `NAME` is the devbox name. The session `NAME` lives on the
@@ -43,8 +43,8 @@ keeps its identity on the devbox volume, so a later start needs no sign-in.
 
 This replaces sharing the server with `tailscale serve`. The devbox's own tailnet node comes from
 Namespace's Tailscale integration and is tagged. A tagged node has no owner, and Rex cannot
-identify callers through Serve for it. Rex's own node needs no tailnet policy change, because
-your own devices can already reach each other.
+identify callers through Serve for it. Rex's own node needs a tailnet grant that lets a
+user reach their own devices on `tcp:7297` and `tcp:443` (`autogroup:members` to `autogroup:self`).
 
 The devbox has no running systemd (its init is `tini`), so `rex server install` does not apply.
 The blueprint uses an init script and a service instead.
@@ -102,7 +102,7 @@ A later edit to the blueprint does not change devboxes that already exist.
 
 - `devbox` CLI, logged in (`devbox login`).
 - MagicDNS and HTTPS certificates enabled on the tailnet.
-- Your devices can reach each other on the tailnet (the default for a user's own devices).
+- A tailnet grant from `autogroup:members` to `autogroup:self` on `tcp:7297` and `tcp:443`.
 
 ## Known limits
 
