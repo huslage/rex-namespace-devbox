@@ -104,6 +104,9 @@ A later edit to the blueprint does not change devboxes that already exist.
 
 ## Known limits
 
+- An idle devbox stops, and its Rex node goes offline with it. `rex -S NAME` does not wake it. Run
+  `rex do devbox_up name=NAME` (it wakes an existing devbox), or set an auto-stop timeout that
+  suits you on the blueprint.
 - A config-file action stops after 30 seconds, so the actions only open a tab that runs
   `devbox.lua`.
 - `devbox_up` runs two commands inside the devbox: `devbox exec NAME -- true` to wake an
