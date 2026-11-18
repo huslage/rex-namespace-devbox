@@ -7,14 +7,18 @@
 -- It is a script, not an action body, because config-file actions have a 30 second
 -- limit and creating a devbox takes longer.
 --
--- The devbox is set up by its blueprint (see README.md): the blueprint's service shares the
--- Rex server with `tailscale serve`. This script runs nothing inside the devbox except one
--- no-op to wake a stopped devbox.
+-- The devbox is set up by its blueprint (see README.md): its service runs the Rex server with
+-- Rex's built-in Tailscale node, which joins the tailnet as the person who signs in, so Rex
+-- admits only that person. The first time, this script opens the sign-in link in the browser.
+-- It runs nothing else inside the devbox except one no-op to wake a stopped devbox and a
+-- read-only status call to find the sign-in link.
 --
--- Needs: the `devbox` CLI (logged in), the blueprint, and a tailnet policy that lets you reach
--- tag:namespace-devbox on tcp:443 (see README.md).
+-- Needs: the `devbox` CLI (logged in) and the blueprint.
 
 local BLUEPRINT = "rex"
+-- The blueprint names the Rex node "rex-<devbox name>". Namespace's own tailnet node already
+-- uses the bare devbox name.
+local NODE_PREFIX = "rex-"
 local PATH = (os.getenv("HOME") or "") .. "/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
 local function say(msg)
@@ -57,14 +61,25 @@ local function devbox_exists(name)
   return false
 end
 
--- The devbox's tailnet name: Namespace names the node after the devbox, in this tailnet.
+-- The Rex node's tailnet name, in this tailnet.
 local function tailnet_name(name)
   local r = must({ "tailscale", "status", "--json" }, { timeout = 30 })
   local ok, st = pcall(rex.json.decode, r.stdout)
   if not ok or not st.MagicDNSSuffix or st.MagicDNSSuffix == "" then
     fail("cannot read the tailnet name from `tailscale status --json`")
   end
-  return name .. "." .. st.MagicDNSSuffix
+  return NODE_PREFIX .. name .. "." .. st.MagicDNSSuffix
+end
+
+-- The sign-in link in the devbox's Rex status, or nil. Only a Tailscale login URL is
+-- accepted, because the text comes from another machine and is passed to `open`.
+local function login_url(name)
+  local r = run({ "devbox", "exec", name, "--", "rex", "server", "status", "--json" }, { timeout = 60 })
+  if not r.ok then
+    return nil
+  end
+  local text = r.stdout:gsub("\\/", "/"):gsub("\\u0026", "&")
+  return text:match("https://login%.tailscale%.com/[%w%-%._~/%?=&%%]+")
 end
 
 local function find_host(label)
@@ -92,10 +107,12 @@ local function register_host(label, dns)
   end
 end
 
--- Netmap changes take a few seconds to reach this machine.
-local function wait_reachable(label, dns)
+-- The node starts after the devbox boots and, the first time, after you sign in. While
+-- waiting, open the sign-in link once when one appears.
+local function wait_reachable(label, devbox, dns)
   local last = ""
-  for _ = 1, 40 do
+  local opened = nil
+  for i = 1, 100 do
     local ok, server = pcall(rex.server, label)
     if ok then
       local res, err = server.call("server.whoami")
@@ -106,17 +123,26 @@ local function wait_reachable(label, dns)
     else
       last = tostring(server)
     end
+    if i % 3 == 1 then
+      local url = login_url(devbox)
+      if url and url ~= opened then
+        opened = url
+        say("sign in to Tailscale to own this devbox's Rex node:\n  " .. url)
+        run({ "open", url }, { timeout = 15 })
+      end
+    end
     rex.sleep(3)
   end
   fail(
     "registered host " .. label .. " but cannot reach https://" .. dns .. ".\n"
-      .. "If DNS fails (no such host), the tailnet policy probably does not let you reach "
-      .. "tag:namespace-devbox on tcp:443.\nLast error: " .. last
+      .. "Check that you signed in to Tailscale as the user who should own the node, and that "
+      .. "the devbox's rex-server service is running (`devbox service list " .. devbox .. "`).\n"
+      .. "Last error: " .. last
   )
 end
 
 local function up(args)
-  local name = args.name or ("rex-" .. os.date("%m%d-%H%M%S"))
+  local name = args.name or ("dev-" .. os.date("%m%d-%H%M%S"))
   if devbox_exists(name) then
     say("devbox " .. name .. " exists; making sure it is running ...")
     must({ "devbox", "exec", name, "--", "true" }, { timeout = 180 })
@@ -128,8 +154,8 @@ local function up(args)
   local dns = tailnet_name(name)
   say("registering host " .. name .. " (https://" .. dns .. ") ...")
   register_host(name, dns)
-  say("waiting for the devbox to answer ...")
-  wait_reachable(name, dns)
+  say("waiting for the Rex node to answer ...")
+  wait_reachable(name, name, dns)
   say("connected. Use: rex -S " .. name .. " ...")
   return { label = name, endpoint = "https://" .. dns }
 end
