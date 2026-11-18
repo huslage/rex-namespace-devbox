@@ -3,7 +3,8 @@
 --   rex do ~/.config/rex/devbox-sync.lua [once=true]
 --
 -- Every INTERVAL seconds it lists your devboxes that install Rex, runs `devbox configure-ssh`
--- for new ones, and writes the list to a cache file that init.lua reads. When the list
+-- for new ones, and writes the list to a cache file that init.lua reads. A host has two
+-- endpoints: the devbox's Rex login server on the tailnet, and SSH as a fallback. When the list
 -- changes, it reloads the Rex config so the hosts appear.
 --
 -- Needs: the `devbox` CLI (logged in).
@@ -55,6 +56,19 @@ local function read_cache()
   return r and r.ok and r.stdout or ""
 end
 
+-- The tailnet's name, for example "example.ts.net", from the local Tailscale client.
+local function tailnet_suffix()
+  local r = run({ "tailscale", "status", "--json" }, 30)
+  if r == nil or not r.ok then
+    return nil
+  end
+  local ok, st = pcall(rex.json.decode, r.stdout)
+  if ok and type(st) == "table" and st.MagicDNSSuffix and st.MagicDNSSuffix ~= "" then
+    return st.MagicDNSSuffix
+  end
+  return nil
+end
+
 local function pass()
   local r = run({ "devbox", "list", "-o", "json" }, 60)
   if r == nil or not r.ok then
@@ -67,13 +81,18 @@ local function pass()
     return
   end
   local old = read_cache()
+  local suffix = tailnet_suffix()
   local lines = {}
   for _, box in ipairs(boxes) do
     local name = box.name
     -- The name goes into a shell command below.
     if type(name) == "string" and name:match("^[%w%-_]+$") and installs_rex(box) then
       local user = (box.spec and box.spec.remote_user) or "devbox"
+      -- Rex tries the endpoints in order: the devbox's login server on the tailnet, then SSH.
       local endpoint = "ssh://" .. user .. "@" .. name .. ".devbox.namespace"
+      if suffix then
+        endpoint = "http://" .. name .. "." .. suffix .. ":7297," .. endpoint
+      end
       if not old:find("^" .. name:gsub("%-", "%%-") .. " ") and not old:find("\n" .. name:gsub("%-", "%%-") .. " ") then
         local c = run({ "devbox", "configure-ssh", name }, 60)
         if c == nil or not c.ok then

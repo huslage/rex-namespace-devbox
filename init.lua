@@ -16,9 +16,13 @@ local PATH = REX_BIN .. ":" .. HOME .. "/.local/bin:/opt/homebrew/bin:/usr/local
 local r = rex.exec({ "cat", CACHE }, { env = { PATH = PATH } })
 if r ~= nil and r.ok then
   for line in r.stdout:gmatch("[^\n]+") do
-    local name, endpoint = line:match("^(%S+) (%S+)$")
+    local name, list = line:match("^(%S+) (%S+)$")
     if name then
-      rex.host({ label = name, endpoints = { endpoint }, icon = "globe" })
+      local endpoints = {}
+      for endpoint in list:gmatch("[^,]+") do
+        endpoints[#endpoints + 1] = endpoint
+      end
+      rex.host({ label = name, endpoints = endpoints, icon = "globe" })
     end
   end
 end
