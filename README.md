@@ -27,13 +27,16 @@ Actions in `init.lua` (logic in `devbox.lua`):
 Both open a tab that shows progress. Connect with `rex -S NAME ...`. Run `rex config reload`
 after you edit `init.lua` or `devbox.lua`.
 
-The devbox does the setup work, not this script. The default image already runs a Rex server,
-so the blueprint only has to share it on the tailnet.
+The devbox does the setup work, not this script. The blueprint has to install Rex, run its
+server and share it on the tailnet. The default image does not include Rex, and the devbox has
+no running systemd (its init is `tini`), so `rex server install` does not apply. The blueprint
+uses an init script and two services instead.
 
 ## Blueprint `rex`
 
 The `devbox` CLI cannot create blueprints. Create it in the Namespace dashboard
 (Devboxes → Blueprints → **New Blueprint**), or with the TypeScript SDK (`blueprints.create`).
+The init script and services can only be set in the dashboard.
 
 | Setting | Value |
 |---|---|
@@ -44,19 +47,28 @@ The `devbox` CLI cannot create blueprints. Create it in the Namespace dashboard
 | Ephemeral | off |
 | Tailscale | the workspace's `tailnet` spec (set as the Devboxes default) |
 
-Service (dashboard only; blueprint services apply when a devbox first starts):
+**Init script.** It runs once, when a devbox is first initialized. It installs Rex from the
+Rex package repository. Choose the channel that matches your local client, because the client
+and server API revisions can differ between channels.
 
-| Field | Value |
-|---|---|
-| Name | `rex-tailnet` |
-| Command | `sh` |
-| Args | `-c`, `rex server start && exec tailscale serve unix:///home/devbox/.local/state/rex/run/server.sock` |
-| Start policy | `on-boot` |
-| Restart policy | `always` |
+```sh
+set -eu
+if [ "$(id -u)" = 0 ]; then sudo=""; else sudo="sudo -n"; fi
+curl -fsSL https://pkgs.superlogical.com/rex/install.sh | $sudo sh -s -- --channel preview
+```
 
-`tailscale serve` runs in the foreground, so the service keeps the share alive and restarts it
-when `tailscaled` is not ready yet. The devbox's node is ephemeral, so the share has to start
-again on every boot.
+**Services.** Blueprint services start on every boot, after the init script, and restart when
+they fail.
+
+| Name | Command | Args | Start | Restart |
+|---|---|---|---|---|
+| `rex-server` | `rex` | `server`, `run` | `on-boot` | `always` |
+| `rex-tailnet` | `tailscale` | `serve`, `unix:///home/devbox/.local/state/rex/run/server.sock` | `on-boot` | `always` |
+
+`rex server run` runs in the foreground and listens on the default Rex socket, which is the
+path that `rex-tailnet` shares. `tailscale serve` also runs in the foreground, so the service
+keeps the share alive and restarts it if `tailscaled` is not ready yet. The devbox's node is
+ephemeral, so the share has to start again on every boot.
 
 A later edit to the blueprint does not change devboxes that already exist.
 
