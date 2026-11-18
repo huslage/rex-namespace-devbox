@@ -77,10 +77,13 @@ they fail.
 | Field | Value |
 |---|---|
 | Name | `rex-server` |
-| Command | `sh` |
-| Args | `-c`, `exec rex server run --tailscale --tailscale-hostname "rex-$(hostname)"` |
+| Command line | `sh -c 'exec rex server run --tailscale --tailscale-hostname "rex-$(hostname)"'` |
 | Start | `on-boot` |
 | Restart | `always` |
+
+The dashboard takes the service as one command line, not a command and a list of arguments. The
+service runs it without a shell, so the `sh -c` is what runs `hostname` and replaces itself with
+`rex` (`exec`). Check that the dashboard keeps the single quotes together.
 
 `rex server run` runs in the foreground. `$(hostname)` is the devbox name, and the `rex-` prefix
 keeps the Rex node apart from Namespace's own node, which uses the bare devbox name. The Rex node
